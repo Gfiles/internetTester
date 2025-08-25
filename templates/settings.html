@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - Network Dashboard</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; padding-bottom: 4em; background-color: #f4f4f9; color: #333; }
+        .main-content { padding: 2em; max-width: 800px; margin: auto; }
+        h1, h2 { color: #444; border-bottom: 1px solid #ddd; padding-bottom: 0.3em; margin-bottom: 1em;}
+        .form-group { margin-bottom: 1.5em; }
+        label { display: block; margin-bottom: 0.5em; font-weight: bold; }
+        input[type="number"], input[type="text"], select { width: 100%; padding: 0.5em; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        input[type="checkbox"] { width: auto; vertical-align: middle; margin-right: 0.5em; }
+        .button-group { margin-top: 2em; }
+        button { padding: 0.7em 1.5em; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; }
+        .save-btn { background-color: #28a745; color: white; }
+        .back-link { display: inline-block; margin-top: 2em; color: #007bff; text-decoration: none; }
+        .status-message { margin-top: 1em; padding: 1em; border-radius: 4px; display: none; }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        footer { position: fixed; bottom: 0; width: 100%; text-align: center; padding: 1em 0; background-color: #e9ecef; color: #6c757d; font-size: 0.9em; border-top: 1px solid #dee2e6; }
+
+        /* Time Frame Editor Styles */
+        .time-frame-header,
+        .time-frame-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .time-frame-row { margin-bottom: 10px; }
+        .time-frame-header {
+            font-weight: bold;
+            color: #555;
+            padding-bottom: 5px;
+            margin-bottom: 5px;
+            border-bottom: 2px solid #ccc;
+        }
+        .time-frame-header span, .time-frame-row input, .time-frame-row select { flex: 1; }
+        .time-frame-header .frame-key, .time-frame-row .frame-key { flex-basis: 100px; }
+        .time-frame-header .frame-label, .time-frame-row .frame-label { flex-basis: 200px; }
+        .time-frame-header .frame-value, .time-frame-row .frame-value { flex-basis: 80px; }
+        .time-frame-header .frame-unit, .time-frame-row .frame-unit { flex-basis: 100px; }
+        .time-frame-header .remove-frame-btn-placeholder { width: 30px; flex-shrink: 0; }
+
+        .remove-frame-btn { background-color: #dc3545; color: white; border: none; border-radius: 50%; width: 30px; height: 30px; font-size: 1.2em; line-height: 1; cursor: pointer; flex-shrink: 0; }
+        #add-frame-btn { background-color: #007bff; color: white; margin-top: 1em; }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .main-content { padding: 1em; }
+            .time-frame-header { display: none; }
+            .time-frame-row {
+                flex-direction: column;
+                align-items: stretch;
+                border: 1px solid #ddd;
+                padding: 1em;
+                border-radius: 4px;
+            }
+            .time-frame-row .frame-key, .time-frame-row .frame-label, .time-frame-row .frame-value, .time-frame-row .frame-unit {
+                flex-basis: auto; /* Reset basis for vertical stacking */
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="main-content">
+        <h1>Settings</h1>
+        <form id="settings-form">
+            <h2>General</h2>
+            <div class="form-group">
+                <label for="interval">Test Interval (minutes)</label>
+                <input type="number" id="interval" name="test_interval_minutes" value="{{ settings.test_interval_minutes }}" min="1" required>
+            </div>
+
+            <div class="form-group">
+                <label for="default-frame">Default Time Frame on Load</label>
+                <select id="default-frame" name="default_time_frame">
+                    {% for key, frame in settings.time_frames.items() %}
+                    <option value="{{ key }}" {% if key == settings.default_time_frame %}selected{% endif %}>{{ frame.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="open-on-startup">
+                    <input type="checkbox" id="open-on-startup" name="open_on_startup" {% if settings.get('open_on_startup', True) %}checked{% endif %}>
+                    Open dashboard in browser on startup
+                </label>
+            </div>
+
+            <div class="form-group">
+                <label for="show-median-lines">
+                    <input type="checkbox" id="show-median-lines" name="show_median_lines" {% if settings.get('show_median_lines', True) %}checked{% endif %}>
+                    Show Median Lines on Graph
+                </label>
+            </div>
+
+            <h2>Time Frames</h2>
+            <div class="time-frame-header">
+                <span class="frame-key">Key</span>
+                <span class="frame-label">Label</span>
+                <span class="frame-value">Value</span>
+                <span class="frame-unit">Unit</span>
+                <span class="remove-frame-btn-placeholder"></span>
+            </div>
+            <div id="time-frames-editor">
+                <!-- Time frames will be dynamically inserted here -->
+            </div>
+            <button type="button" id="add-frame-btn">Add Time Frame</button>
+
+            <div class="button-group">
+                <button type="submit" class="save-btn">Save Settings</button>
+            </div>
+        </form>
+        <div id="status-message" class="status-message"></div>
+        <a href="{{ url_for('dashboard') }}" class="back-link">&larr; Back to Dashboard</a>
+    </div>
+
+    <footer>
+        Version: {{ version }}
+    </footer>
+
+    <template id="time-frame-template">
+        <div class="time-frame-row">
+            <input type="text" class="frame-key" placeholder="Key (e.g., 1hr)" required>
+            <input type="text" class="frame-label" placeholder="Label (e.g., Last Hour)" required>
+            <input type="number" class="frame-value" placeholder="Value" min="1" required>
+            <select class="frame-unit">
+                <option value="hours">Hours</option>
+                <option value="days">Days</option>
+                <option value="weeks">Weeks</option>
+                <option value="months">Months</option>
+                <option value="years">Years</option>
+            </select>
+            <button type="button" class="remove-frame-btn" title="Remove time frame">&times;</button>
+        </div>
+    </template>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const editor = document.getElementById('time-frames-editor');
+            const template = document.getElementById('time-frame-template');
+            const addBtn = document.getElementById('add-frame-btn');
+            const settingsForm = document.getElementById('settings-form');
+            const defaultFrameSelect = document.getElementById('default-frame');
+
+            const timeFramesData = {{ settings.time_frames | tojson }};
+
+            function createFrameRow(key, frameData) {
+                const content = template.content.cloneNode(true);
+                const row = content.querySelector('.time-frame-row');
+                
+                const keyInput = row.querySelector('.frame-key');
+                const labelInput = row.querySelector('.frame-label');
+                const valueInput = row.querySelector('.frame-value');
+                const unitInput = row.querySelector('.frame-unit');
+                
+                keyInput.value = key || '';
+                if (frameData) {
+                    labelInput.value = frameData.label;
+                    if (frameData.delta && Object.keys(frameData.delta).length > 0) {
+                        const unit = Object.keys(frameData.delta)[0];
+                        const value = frameData.delta[unit];
+                        valueInput.value = value;
+                        unitInput.value = unit;
+                    }
+                }
+
+                row.querySelector('.remove-frame-btn').addEventListener('click', () => {
+                    row.remove();
+                    updateDefaultFrameOptions();
+                });
+
+                // Update default frame options when a key is changed
+                keyInput.addEventListener('input', updateDefaultFrameOptions);
+                labelInput.addEventListener('input', updateDefaultFrameOptions);
+
+                editor.appendChild(row);
+            }
+
+            function updateDefaultFrameOptions() {
+                const selectedDefault = defaultFrameSelect.value;
+                defaultFrameSelect.innerHTML = ''; // Clear existing options
+                
+                const rows = editor.querySelectorAll('.time-frame-row');
+                rows.forEach(row => {
+                    const key = row.querySelector('.frame-key').value.trim();
+                    const label = row.querySelector('.frame-label').value.trim();
+                    if (key && label) {
+                        const option = document.createElement('option');
+                        option.value = key;
+                        option.textContent = label;
+                        defaultFrameSelect.appendChild(option);
+                    }
+                });
+                
+                // Add the 'All Time' option
+                const allOption = document.createElement('option');
+                allOption.value = 'all';
+                allOption.textContent = 'All Time';
+                defaultFrameSelect.appendChild(allOption);
+
+                // Try to re-select the previously selected option
+                if (Array.from(defaultFrameSelect.options).some(opt => opt.value === selectedDefault)) {
+                    defaultFrameSelect.value = selectedDefault;
+                }
+            }
+
+            // Populate existing time frames
+            for (const key in timeFramesData) {
+                if (key !== 'all') {
+                    createFrameRow(key, timeFramesData[key]);
+                }
+            }
+
+            addBtn.addEventListener('click', () => {
+                createFrameRow('', null);
+            });
+
+            settingsForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                const timeFrames = {};
+                const rows = editor.querySelectorAll('.time-frame-row');
+                let validationError = '';
+
+                for (const row of rows) {
+                    const key = row.querySelector('.frame-key').value.trim();
+                    const label = row.querySelector('.frame-label').value.trim();
+                    const value = row.querySelector('.frame-value').value;
+                    const unit = row.querySelector('.frame-unit').value;
+
+                    if (!key || !label || !value) {
+                        validationError = 'All fields for a time frame are required.';
+                        break;
+                    }
+                    if (timeFrames[key]) {
+                        validationError = `Time frame key "${key}" is duplicated.`;
+                        break;
+                    }
+                    if (!/^[a-zA-Z0-9_]+$/.test(key)) {
+                        validationError = `Time frame key "${key}" contains invalid characters. Use only letters, numbers, and underscores.`;
+                        break;
+                    }
+
+                    timeFrames[key] = {
+                        label: label,
+                        delta: { [unit]: parseInt(value, 10) }
+                    };
+                }
+
+                if (validationError) {
+                    const statusDiv = document.getElementById('status-message');
+                    statusDiv.className = 'status-message error';
+                    statusDiv.textContent = 'Error: ' + validationError;
+                    statusDiv.style.display = 'block';
+                    return;
+                }
+
+                const form = e.target;
+                const data = {
+                    test_interval_minutes: form.elements.test_interval_minutes.value,
+                    default_time_frame: form.elements.default_time_frame.value,
+                    open_on_startup: form.elements.open_on_startup.checked,
+                    show_median_lines: form.elements.show_median_lines.checked,
+                    time_frames: timeFrames
+                };
+                
+                const statusDiv = document.getElementById('status-message');
+                statusDiv.style.display = 'none';
+
+                try {
+                    const response = await fetch('/api/settings', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data),
+                    });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.message || 'Failed to save settings.');
+                    
+                    statusDiv.className = 'status-message success';
+                    statusDiv.textContent = result.message + ' Redirecting to dashboard in 3 seconds.';
+                    setTimeout(() => window.location.href = '/dashboard', 3000);
+                } catch (error) {
+                    statusDiv.className = 'status-message error';
+                    statusDiv.textContent = 'Error: ' + error.message;
+                }
+                statusDiv.style.display = 'block';
+            });
+        });
+    </script>
+</body>
+</html>

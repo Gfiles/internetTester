@@ -1,5 +1,4 @@
-# Build command:
-# pyinstaller --clean --name InternetTester --onefile --windowed --add-data "templates;templates" --add-data "static;static" --hidden-import "apscheduler.schedulers.background" --hidden-import "apscheduler.executors.default" --hidden-import "apscheduler.jobstores.default" app.py
+# To build the executable, run the `build.py` script.
 import sqlite3
 from flask import Flask, jsonify, request, render_template, redirect, url_for
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -9,6 +8,30 @@ import webbrowser
 from threading import Timer
 import os
 import sys
+import statistics
+import json
+import logging
+
+VERSION = "2025.08.25"
+
+def get_default_settings():
+    """Returns a dictionary with the default settings."""
+    return {
+        "show_median_lines": True,
+        "open_on_startup": True,
+        "test_interval_minutes": 15,
+        "default_time_frame": "1hour",
+        "time_frames": {
+            "1hour": {"label": "Last Hour", "delta": {"hours": 1}},
+            "4hours": {"label": "Last 4 Hours", "delta": {"hours": 4}},
+            "12hours": {"label": "Last 12 Hours", "delta": {"hours": 12}},
+            "day": {"label": "Last 24 Hours", "delta": {"days": 1}},
+            "week": {"label": "Last Week", "delta": {"weeks": 1}},
+            "month": {"label": "Last Month", "delta": {"days": 30}},
+            "year": {"label": "Last Year", "delta": {"days": 365}},
+            "all": {"label": "All Time", "delta": {}}
+        }
+    }
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -21,7 +44,92 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 app = Flask(__name__, template_folder=resource_path('templates'), static_folder=resource_path('static'))
-db_path = 'network_tests.db'
+
+# Determine the base path for the database, which works for development and for a PyInstaller bundle.
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    # In a PyInstaller bundle, use the executable's directory
+    application_path = os.path.dirname(sys.executable)
+else:
+    # In a normal Python environment, use the script's directory
+    application_path = os.path.dirname(os.path.abspath(__file__))
+db_path = os.path.join(application_path, 'network_tests.db')
+log_path = os.path.join(application_path, 'app.log')
+
+# Setup logging to file and console
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_path),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+def init_db():
+    """Creates database tables if they don't exist."""
+    logging.info(f"Initializing database at: {db_path}")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS network_tests (
+                timestamp DATETIME PRIMARY KEY,
+                download_mbps REAL,
+                upload_mbps REAL,
+                latency_ms REAL
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
+    logging.info(f"Database '{db_path}' initialized.")
+
+def load_settings():
+    """Loads settings from the database, populating with defaults if necessary."""
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT key, value FROM settings")
+        db_settings = dict(cursor.fetchall())
+
+    settings = {}
+    default_settings = get_default_settings()
+    is_updated = False
+
+    # Check for missing settings and apply defaults
+    for key, default_value in default_settings.items():
+        if key not in db_settings:
+            settings[key] = default_value
+            is_updated = True
+        else:
+            # Deserialize values from DB text
+            db_value = db_settings[key]
+            if isinstance(default_value, bool):
+                settings[key] = str(db_value).lower() in ('true', '1')
+            elif isinstance(default_value, int):
+                settings[key] = int(db_value)
+            elif isinstance(default_value, (dict, list)):
+                try:
+                    settings[key] = json.loads(db_value)
+                except json.JSONDecodeError:
+                    logging.warning(f"Could not decode setting '{key}'. Using default.")
+                    settings[key] = default_value
+            else:
+                settings[key] = db_value
+
+    if is_updated:
+        logging.info("Some settings were missing, populating database with defaults.")
+        save_settings(settings)
+
+    return settings
+
+def save_settings(settings_dict):
+    """Saves the settings dictionary to the database."""
+    with sqlite3.connect(db_path) as conn:
+        for key, value in settings_dict.items():
+            db_value = json.dumps(value) if isinstance(value, (dict, list)) else str(value)
+            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, db_value))
+    logging.info("Settings saved to database.")
 
 def measure_network_quality():
     """ Measures network quality (download, upload, and latency).
@@ -47,16 +155,19 @@ def measure_network_quality():
             "ping": ping,
         }
     except speedtest.SpeedtestException as e:
-        print(f"A speedtest error occurred: {e}")
+        if '429' in str(e):
+            logging.warning(f"Speedtest rate limit hit: {e}. Consider increasing the test interval in the settings.")
+        else:
+            logging.error(f"A speedtest error occurred: {e}")
         return {"download": None, "upload": None, "ping": None}
     except Exception as e:
-        print(f"An unexpected error during speed test: {e}")
+        logging.error("An unexpected error during speed test.", exc_info=True)
         return {"download": None, "upload": None, "ping": None}
 
 
 def run_test_and_store():
     """Runs the network test and stores the results in the database."""
-    print(f"Attempting to run test at {datetime.now()}")
+    logging.info(f"Attempting to run test at {datetime.now()}")
     results = measure_network_quality()
     if results["download"] is not None: # Only store if test was successful
         try:
@@ -66,59 +177,40 @@ def run_test_and_store():
                     INSERT INTO network_tests (timestamp, download_mbps, upload_mbps, latency_ms)
                     VALUES (?, ?, ?, ?)
                 ''', (timestamp, results['download'], results['upload'], results['ping']))
-            print(f"Test run at {timestamp}: Download={results['download']:.2f} Mbps, Upload={results['upload']:.2f} Mbps, Latency={results['ping']:.2f} ms")
+            logging.info(f"Test run at {timestamp}: Download={results['download']:.2f} Mbps, Upload={results['upload']:.2f} Mbps, Latency={results['ping']:.2f} ms")
         except sqlite3.Error as e:
-            print(f"Database error when storing results: {e}")
+            logging.error("Database error when storing results.", exc_info=True)
     else:
-        print("Speed test failed, not storing results.")
+        logging.warning("Speed test failed, not storing results.")
 
-
-# Check if the database file exists, if not, create the table
-if not os.path.exists(db_path):
-    try:
-        with sqlite3.connect(db_path) as conn:
-            conn.execute('''
-                CREATE TABLE network_tests (
-                    timestamp DATETIME PRIMARY KEY,
-                    download_mbps REAL,
-                    upload_mbps REAL,
-                    latency_ms REAL
-                )
-            ''')
-        print(f"Database '{db_path}' and table 'network_tests' created.")
-    except sqlite3.Error as e:
-        print(f"Error creating database or table: {e}")
-else:
-    print(f"Database '{db_path}' already exists.")
-
+# Initialize database tables and load settings
+init_db()
+settings = load_settings()
 
 # Initialize and start the scheduler
-scheduler = BackgroundScheduler()
-# Schedule the job to run every 5 minutes
-scheduler.add_job(run_test_and_store, 'interval', minutes=5)
-#scheduler.add_job(run_test_and_store, 'interval', seconds=5)
-
+scheduler = BackgroundScheduler(daemon=True)
+scheduler.add_job(
+    run_test_and_store,
+    'interval',
+    minutes=settings.get('test_interval_minutes', 5),
+    id='speedtest_job',
+    next_run_time=datetime.now()
+)
 scheduler.start()
-print("Scheduler started.")
+logging.info(f"Scheduler started. Interval: {settings.get('test_interval_minutes', 15)} minutes.")
 
 
 @app.route('/api/network_data', methods=['GET'])
 def get_network_data():
     """API endpoint to retrieve network data with optional time filtering."""
-    time_frame = request.args.get('time_frame', 'all') # default to 'all'
+    time_frame_key = request.args.get('time_frame', settings.get('default_time_frame', '1hour'))
     start_time = None
 
-    if time_frame != 'all':
-        end_time = datetime.now()
-        time_deltas = {
-            'day': timedelta(days=1),
-            'week': timedelta(weeks=1),
-            'month': timedelta(days=30), # Approximation for month
-            'year': timedelta(days=365), # Approximation for year
-        }
-        delta = time_deltas.get(time_frame)
-        if delta:
-            start_time = end_time - delta
+    time_frames = settings.get('time_frames', get_default_settings()['time_frames'])
+    if time_frame_key != 'all' and time_frame_key in time_frames:
+        delta_args = time_frames[time_frame_key].get('delta')
+        if delta_args:
+            start_time = datetime.now() - timedelta(**delta_args)
 
     query = '''
         SELECT timestamp, download_mbps, upload_mbps, latency_ms
@@ -128,7 +220,7 @@ def get_network_data():
 
     if start_time:
         query += ' WHERE timestamp >= ?'
-        params.append(start_time)
+        params.append(start_time.isoformat())
 
     query += ' ORDER BY timestamp ASC'
 
@@ -141,22 +233,96 @@ def get_network_data():
             for row in cursor.fetchall():
                 data.append(dict(row))
     except sqlite3.Error as e:
-        print(f"Error fetching data from database: {e}")
+        logging.error("Error fetching data from database.", exc_info=True)
 
-    return jsonify(data)
+    # Calculate medians
+    medians = {
+        "download": None,
+        "upload": None,
+        "ping": None
+    }
+    if data:
+        downloads = [d['download_mbps'] for d in data if d['download_mbps'] is not None]
+        uploads = [d['upload_mbps'] for d in data if d['upload_mbps'] is not None]
+        pings = [d['latency_ms'] for d in data if d['latency_ms'] is not None]
+
+        if downloads:
+            medians["download"] = statistics.median(downloads)
+        if uploads:
+            medians["upload"] = statistics.median(uploads)
+        if pings:
+            medians["ping"] = statistics.median(pings)
+
+    # Return a structured response
+    return jsonify({"time_series": data, "medians": medians})
 
 @app.route('/')
 def index():
-    """Basic route to serve the frontend HTML file."""
-    # In a real application, you would serve an HTML file here
-    # For now, just return a simple message
     """Redirects to the main dashboard page."""
     return redirect(url_for('dashboard'))
 
 @app.route('/dashboard')
 def dashboard():
     """Serves the main dashboard HTML page."""
-    return render_template('index.html')
+    return render_template('index.html', settings=settings, version=VERSION)
+
+@app.route('/settings')
+def settings_page():
+    """Serves the settings page."""
+    return render_template('settings.html', settings=settings, version=VERSION)
+
+@app.route('/api/settings', methods=['GET', 'POST'])
+def manage_settings():
+    """API endpoint to get and set application settings."""
+    global settings
+    if request.method == 'POST':
+        try:
+            new_settings_data = request.json
+            new_interval = int(new_settings_data.get('test_interval_minutes'))
+
+            # Handle the new checkbox setting
+            open_on_startup = new_settings_data.get('open_on_startup')
+            if isinstance(open_on_startup, bool):
+                settings['open_on_startup'] = open_on_startup
+
+            # Handle show_median_lines
+            show_median = new_settings_data.get('show_median_lines')
+            if isinstance(show_median, bool):
+                settings['show_median_lines'] = show_median
+
+            # Handle test interval
+            if new_interval > 0 and new_interval != settings.get('test_interval_minutes'):
+                settings['test_interval_minutes'] = new_interval
+                scheduler.reschedule_job('speedtest_job', trigger='interval', minutes=new_interval)
+                logging.info(f"Rescheduled speed test interval to {new_interval} minutes.")
+
+            # Handle time frames update
+            if 'time_frames' in new_settings_data:
+                new_time_frames = new_settings_data['time_frames']
+                if not isinstance(new_time_frames, dict):
+                    raise ValueError("time_frames must be an object.")
+                
+                # Ensure 'all' is always present
+                if 'all' not in new_time_frames:
+                    new_time_frames['all'] = get_default_settings()['time_frames']['all']
+                
+                settings['time_frames'] = new_time_frames
+
+            # Handle default time frame, ensuring it's valid
+            new_default_frame = new_settings_data.get('default_time_frame')
+            if new_default_frame in settings.get('time_frames', {}):
+                settings['default_time_frame'] = new_default_frame
+            else:
+                # If the old default was deleted or is invalid, pick a new one.
+                available_keys = [k for k in settings.get('time_frames', {}).keys() if k != 'all']
+                settings['default_time_frame'] = available_keys[0] if available_keys else 'all'
+
+            save_settings(settings)
+            return jsonify({"status": "success", "message": "Settings saved successfully."})
+        except (ValueError, KeyError, TypeError) as e:
+            logging.error(f"Invalid settings data received: {e}", exc_info=True)
+            return jsonify({"status": "error", "message": f"Invalid settings data: {e}"}), 400
+    return jsonify(settings)
 
 if __name__ == '__main__':
     # Use Waitress as the production WSGI server
@@ -171,10 +337,13 @@ if __name__ == '__main__':
         """
         webbrowser.open_new_tab(dashboard_url)
 
-    print(f"Starting server on {host}:{port}")
-    print(f"Dashboard will open automatically at: {dashboard_url}")
+    logging.info(f"Starting server on http://{host}:{port}")
 
-    # Open the browser one second after the server starts
-    Timer(1, open_browser).start()
+    # Check the setting before opening the browser
+    if settings.get("open_on_startup", True):
+        logging.info(f"Dashboard will open automatically at: {dashboard_url}")
+        Timer(1, open_browser).start()
+    else:
+        logging.info(f"Dashboard is available at: {dashboard_url}")
 
     serve(app, host=host, port=port)
