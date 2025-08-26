@@ -8,7 +8,7 @@ import platform
 # Import version from the main app to keep it in one place.
 from app import VERSION
 
-APP_NAME = "InternetTester"
+APP_NAME = "internetTester"
 DEVELOPER_NAME = "Gavin Goncalves"  # <-- IMPORTANT: Change this to your name/company
 MAIN_SCRIPT = "app.py"
 FILE_DESCRIPTION = "Internet Speed Test and Logging Tool"
@@ -23,14 +23,22 @@ elif sys.platform.startswith('linux') and machine_arch in ('x86_64', 'i686', 'x8
     APP_NAME += "_deb"
 
 # --- PyInstaller Build Command ---
-pyinstaller_command = [
-    'pyinstaller', '--name', APP_NAME, '--onefile', '--clean',
-    '--add-data', 'templates;templates', '--add-data', 'static;static',
-    '--hidden-import', 'apscheduler.schedulers.background',
-    '--hidden-import', 'apscheduler.executors.default',
-    '--hidden-import', 'apscheduler.jobstores.default',
-    MAIN_SCRIPT
-]
+if sys.platform == 'win32':
+    pyinstaller_command = [
+        'pyinstaller', '--name', APP_NAME, '--onefile', '--clean',
+        '--add-data', 'templates;templates', '--add-data', 'static;static',
+        '--hidden-import', 'apscheduler.schedulers.background',
+        '--hidden-import', 'apscheduler.executors.default',
+        '--hidden-import', 'apscheduler.jobstores.default',
+        MAIN_SCRIPT
+    ]
+else:
+        pyinstaller_command = [
+        'pyinstaller', '--name', APP_NAME, '--onefile', '--clean',
+        '--add-data', 'templates*:.', '--add-data', 'static*:.',
+        MAIN_SCRIPT
+    ]
+
 
 version_file_path = "version.txt"
 
