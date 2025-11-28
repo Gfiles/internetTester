@@ -59,6 +59,9 @@ if sys.platform == 'win32':
         '--hidden-import', 'apscheduler.schedulers.background',
         '--hidden-import', 'apscheduler.executors.default',
         '--hidden-import', 'apscheduler.jobstores.default',
+        '--hidden-import', 'waitress',
+        '--hidden-import', 'pystray',
+        '--hidden-import', 'PIL',
         '--add-data', 'icon.png;.',
         '--icon=icon.png',
         MAIN_SCRIPT

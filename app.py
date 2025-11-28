@@ -1,18 +1,24 @@
 # To build the executable, run the `build.py` script.
 import sqlite3
 from flask import Flask, jsonify, request, render_template, redirect, url_for
-from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.schedulers.background import BackgroundScheduler # pip install apscheduler
 from datetime import datetime, timedelta
-import speedtest
-import webbrowser
+import speedtest #pip install speedtest-cli
+import webbrowser, sys, os # pip install webbrowser
 from threading import Timer
 import os
 import sys
 import statistics
 import json
 import logging
+from waitress import serve # pip install waitress
 
-VERSION = "2025.08.25"
+from PIL import Image # pip install Pillow
+from pystray import Icon as TrayIcon, MenuItem as item, Menu #pip install pystray
+import threading
+
+VERSION = "2025.11.28"
+APP_NAME = "internetTester"
 
 def get_default_settings():
     """Returns a dictionary with the default settings."""
@@ -331,26 +337,52 @@ def manage_settings():
             return jsonify({"status": "error", "message": f"Invalid settings data: {e}"}), 400
     return jsonify(settings)
 
-if __name__ == '__main__':
-    # Use Waitress as the production WSGI server
-    from waitress import serve
-    host = "0.0.0.0"
+def open_browser():
+    """
+    Opens the dashboard URL in a new browser tab.
+    """
     port = settings.get("port", 5010)
     dashboard_url = f"http://127.0.0.1:{port}/dashboard"
+    webbrowser.open_new_tab(dashboard_url)
 
-    def open_browser():
-        """
-        Opens the dashboard URL in a new browser tab.
-        """
-        webbrowser.open_new_tab(dashboard_url)
+def exit_action(icon, item):
+    """Function to be called when 'Exit' is clicked."""
+    logging.info("Exit command received. Shutting down.")
+    icon.stop()
+    # A hard exit is the most reliable way to ensure all threads (like waitress) are terminated.
+    os._exit(0)
 
+def run_tray_icon():
+    """Creates and runs the system tray icon."""
+    try:
+        image = Image.open(resource_path("icon.png"))
+        menu = (
+            item(f"Internet Tester: v_{VERSION}", None, enabled=False),
+            Menu.SEPARATOR,
+            item('Open Dashboard', open_browser, default=True),
+            item('Exit', exit_action)
+        )
+        tray_icon = TrayIcon(APP_NAME, image, f"{APP_NAME} v{VERSION}", menu)
+        logging.info("Starting system tray icon.")
+        tray_icon.run()
+    except Exception as e:
+        logging.error(f"Failed to create system tray icon: {e}", exc_info=True)
+
+def run_web_server():
+    """Starts the Flask web server using Waitress."""
+    host = "0.0.0.0"
+    port = settings.get("port", 5010)
     logging.info(f"Starting server on http://{host}:{port}")
-
-    # Check the setting before opening the browser
     if settings.get("open_on_startup", True):
-        logging.info(f"Dashboard will open automatically at: {dashboard_url}")
+        logging.info(f"Dashboard will open automatically at: http://127.0.0.1:{port}/dashboard")
         Timer(1, open_browser).start()
     else:
-        logging.info(f"Dashboard is available at: {dashboard_url}")
-
+        logging.info(f"Dashboard is available at: http://127.0.0.1:{port}/dashboard")
     serve(app, host=host, port=port)
+
+if __name__ == '__main__':
+    # Run the web server in a separate thread
+    server_thread = threading.Thread(target=run_web_server, daemon=True)
+    server_thread.start()
+    # Run the tray icon in the main thread (pystray must be in the main thread on macOS)
+    run_tray_icon()
