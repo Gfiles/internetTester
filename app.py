@@ -4,6 +4,11 @@
 # The speedtest-cli library has an issue where it tries to access sys.stdout.fileno(),
 # which fails in a frozen/windowed application because sys.stdout is None.
 # This patch redirects stdout/stderr to devnull if they are None, before speedtest is imported.
+
+# Install on Raspberry Pi
+# sudo apt-get update
+# sudo apt-get install -y libayatana-appindicator3-1 gir1.2-ayatanaappindicator3-0.1
+
 import sys
 if getattr(sys, 'frozen', False) and sys.stdout is None:
     sys.stdout = open(os.devnull, 'w')
@@ -21,8 +26,8 @@ import json
 import logging
 from waitress import serve # pip install waitress
 
-from PIL import Image # pip install Pillow
-from pystray import Icon as TrayIcon, MenuItem as item, Menu #pip install pystray
+from PIL import Image
+from pystray import Icon as TrayIcon, MenuItem as item, Menu
 import threading
 
 VERSION = "2025.11.28"
@@ -389,8 +394,43 @@ def run_web_server():
     serve(app, host=host, port=port)
 
 if __name__ == '__main__':
-    # Run the web server in a separate thread
-    server_thread = threading.Thread(target=run_web_server, daemon=True)
-    server_thread.start()
-    # Run the tray icon in the main thread (pystray must be in the main thread on macOS)
-    run_tray_icon()
+    try:
+        # On Linux, explicitly setting the backend can prevent Gdk warnings.
+        if sys.platform.startswith('linux'):
+            os.environ['PYSTRAY_BACKEND'] = 'appindicator'
+
+        # Run the web server in a separate thread
+        server_thread = threading.Thread(target=run_web_server, daemon=True)
+        server_thread.start()
+        # Run the tray icon in the main thread (pystray must be in the main thread on macOS)
+        run_tray_icon()
+
+    except (ValueError, ImportError) as e:
+        # This is a common issue on Linux/Raspberry Pi if indicator libraries are missing.
+        # We check for both the original ValueError and an ImportError if the backend fails.
+        if "Namespace AyatanaAppIndicator3 not available" in str(e) or "No module named 'gi'" in str(e):
+            logging.error("Caught missing AyatanaAppIndicator3 library. Displaying error GUI.")
+            try:
+                # Use tkinter to show a user-friendly error message.
+                import tkinter as tk
+                from tkinter import messagebox
+
+                root = tk.Tk()
+                root.withdraw()  # Hide the main tkinter window
+                
+                title = "Missing System Dependency"
+                message = (
+                    "The system library required for the tray icon is not installed.\n\n"
+                    "Please run the following command in a terminal to install it:\n\n"
+                    "sudo apt-get update && sudo apt-get install -y libayatana-appindicator3-1 gir1.2-ayatanaappindicator3-0.1\n\n"
+                    "The application will now exit."
+                )
+                messagebox.showerror(title, message)
+            except Exception as tk_error:
+                logging.error(f"Failed to show tkinter error message: {tk_error}")
+            # Ensure the application exits after the error.
+            os._exit(1)
+        else:
+            # Re-raise any other error
+            logging.error(f"An unexpected error occurred on startup: {e}", exc_info=True)
+            raise
