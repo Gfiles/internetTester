@@ -3,15 +3,40 @@ import subprocess
 from datetime import datetime
 import sys
 import platform
+import re
 
 # --- Configuration ---
 # Import version from the main app to keep it in one place.
-from app import VERSION
+VERSION = datetime.now().strftime("%Y.%m.%d")
 
 APP_NAME = "internetTester"
 DEVELOPER_NAME = "Gavin Goncalves"  # <-- IMPORTANT: Change this to your name/company
 MAIN_SCRIPT = "app.py"
 FILE_DESCRIPTION = "Internet Speed Test and Logging Tool"
+
+# --- Update version in main script ---
+print(f"Updating version in {MAIN_SCRIPT} to {VERSION}...")
+try:
+    with open(MAIN_SCRIPT, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    # Use regex to find and replace the version line: VERSION = "..."
+    new_content, count = re.subn(
+        r'^(VERSION\s*=\s*["\']).*?(["\'])',  # Regex to find VERSION = "..." or '...'
+        fr'\g<1>{VERSION}\g<2>',             # Replace with the new version, keeping original quotes
+        content,
+        count=1,                             # Replace only the first occurrence
+        flags=re.MULTILINE                   # Ensure ^ matches start of line
+    )
+
+    if count > 0:
+        with open(MAIN_SCRIPT, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+        print(f"Successfully updated version in {MAIN_SCRIPT}.")
+    else:
+        print(f"Warning: Could not find a VERSION line to update in {MAIN_SCRIPT}.")
+except Exception as e:
+    print(f"An error occurred while updating version in {MAIN_SCRIPT}: {e}")
 
 # --- Architecture-specific modifications ---
 machine_arch = platform.machine().lower()
@@ -25,17 +50,28 @@ elif sys.platform.startswith('linux') and machine_arch in ('x86_64', 'i686', 'x8
 # --- PyInstaller Build Command ---
 if sys.platform == 'win32':
     pyinstaller_command = [
-        'pyinstaller', '--name', APP_NAME, '--onefile', '--clean',
-        '--add-data', 'templates;templates', '--add-data', 'static;static',
+        'pyinstaller', 
+        '--name', APP_NAME, 
+        '--onefile', 
+        '--clean',
+        '--add-data', 'templates;templates', 
+        '--add-data', 'static;static',
         '--hidden-import', 'apscheduler.schedulers.background',
         '--hidden-import', 'apscheduler.executors.default',
         '--hidden-import', 'apscheduler.jobstores.default',
+        '--add-data', 'icon.png;.',
+        '--icon=icon.png',
         MAIN_SCRIPT
     ]
 else:
-        pyinstaller_command = [
-        'pyinstaller', '--name', APP_NAME, '--onefile', '--clean',
-        '--add-data', 'templates*:.', '--add-data', 'static*:.',
+       pyinstaller_command = [
+        'pyinstaller', 
+        '--name', APP_NAME, 
+        '--onefile', 
+        '--clean',
+        '--add-data', 'templates*:.', 
+        '--add-data', 'icon.png;.',
+        '--icon=icon.png',
         MAIN_SCRIPT
     ]
 

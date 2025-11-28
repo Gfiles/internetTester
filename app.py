@@ -17,6 +17,7 @@ VERSION = "2025.08.25"
 def get_default_settings():
     """Returns a dictionary with the default settings."""
     return {
+        "port": 5010,
         "show_median_lines": True,
         "open_on_startup": True,
         "test_interval_minutes": 15,
@@ -278,12 +279,18 @@ def manage_settings():
     if request.method == 'POST':
         try:
             new_settings_data = request.json
-            new_interval = int(new_settings_data.get('test_interval_minutes'))
+
+            # Handle port
+            new_port = new_settings_data.get('port')
+            if new_port and new_port != settings.get('port'):
+                settings['port'] = int(new_port)
 
             # Handle the new checkbox setting
             open_on_startup = new_settings_data.get('open_on_startup')
             if isinstance(open_on_startup, bool):
                 settings['open_on_startup'] = open_on_startup
+
+            new_interval = int(new_settings_data.get('test_interval_minutes'))
 
             # Handle show_median_lines
             show_median = new_settings_data.get('show_median_lines')
@@ -328,7 +335,7 @@ if __name__ == '__main__':
     # Use Waitress as the production WSGI server
     from waitress import serve
     host = "0.0.0.0"
-    port = 5000
+    port = settings.get("port", 5010)
     dashboard_url = f"http://127.0.0.1:{port}/dashboard"
 
     def open_browser():
