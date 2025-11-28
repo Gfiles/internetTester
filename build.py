@@ -64,6 +64,7 @@ if sys.platform == 'win32':
         '--hidden-import', 'PIL',
         '--add-data', 'icon.png;.',
         '--icon=icon.png',
+        '--noconsole',
         MAIN_SCRIPT
     ]
 else:

@@ -1,13 +1,21 @@
 # To build the executable, run the `build.py` script.
+
+# --- PyInstaller/speedtest-cli Patch ---
+# The speedtest-cli library has an issue where it tries to access sys.stdout.fileno(),
+# which fails in a frozen/windowed application because sys.stdout is None.
+# This patch redirects stdout/stderr to devnull if they are None, before speedtest is imported.
+import sys
+if getattr(sys, 'frozen', False) and sys.stdout is None:
+    sys.stdout = open(os.devnull, 'w')
+    sys.stderr = open(os.devnull, 'w')
+
 import sqlite3
 from flask import Flask, jsonify, request, render_template, redirect, url_for
 from apscheduler.schedulers.background import BackgroundScheduler # pip install apscheduler
 from datetime import datetime, timedelta
 import speedtest #pip install speedtest-cli
-import webbrowser, sys, os # pip install webbrowser
+import webbrowser, os
 from threading import Timer
-import os
-import sys
 import statistics
 import json
 import logging
