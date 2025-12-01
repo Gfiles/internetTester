@@ -73,8 +73,9 @@ else:
         '--name', APP_NAME, 
         '--onefile', 
         '--clean',
-        '--add-data', 'templates*:.', 
-        '--add-data', 'icon.png;.',
+        '--add-data', 'templates:templates',
+        '--add-data', 'static:static',
+        '--add-data', 'icon.png:.',
         '--icon=icon.png',
         MAIN_SCRIPT
     ]

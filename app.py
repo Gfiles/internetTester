@@ -25,9 +25,13 @@ import statistics
 import json
 import logging
 from waitress import serve # pip install waitress
+import subprocess
 
 from PIL import Image
-from pystray import Icon as TrayIcon, MenuItem as item, Menu
+try:
+    from pystray import Icon as TrayIcon, MenuItem as item, Menu #pip install pystray
+except ValueError:
+     subprocess.run(['sudo', 'apt', 'install', '-y', 'libayatana-appindicator3-1', 'gir1.2-ayatanaappindicator3-0.1'])
 import threading
 
 VERSION = "2025.11.28"
@@ -356,7 +360,10 @@ def open_browser():
     """
     port = settings.get("port", 5010)
     dashboard_url = f"http://127.0.0.1:{port}/dashboard"
-    webbrowser.open_new_tab(dashboard_url)
+    if sys.platform.startswith('linux'):
+        subprocess.Popen(['firefox', dashboard_url])
+    else:
+        webbrowser.open_new_tab(dashboard_url)
 
 def exit_action(icon, item):
     """Function to be called when 'Exit' is clicked."""
